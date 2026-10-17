@@ -1,2 +1,10 @@
 .DS_Store
 node_modules/
+
+# Investigation data — never commit an APK, its decompiled code, or findings.
+input/
+workspace/
+findings/
+*.apk
+status.json
+*.tmp

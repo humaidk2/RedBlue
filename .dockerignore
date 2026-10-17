@@ -1,0 +1,5 @@
+# The harness build context is the repo root (it needs tools.txt). Keep the
+# APK, decompiled output, and findings out of the image entirely.
+*
+!tools.txt
+!harness/

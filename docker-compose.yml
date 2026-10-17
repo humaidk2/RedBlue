@@ -1,0 +1,172 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ApkScope — sealed APK investigation with a local LLM.
+#
+# Drive it with ./apkscope.sh (it exports the variables below from
+# apkscope.config.sh and llm.env, and runs the validate gate first). Running
+# compose by hand fails fast on the :? guards rather than half-starting.
+#
+# Network model:
+#
+#   decompile    network_mode: none     no network at all
+#   harness      sealed (internal)      reaches ONLY egress-proxy + llm-gateway
+#   egress-proxy sealed + upstream      tinyproxy, default-deny allowlist
+#                                       (ai-proxy/filter, empty by default)
+#   llm-gateway  sealed + hostward      socat to the ONE LLM host:port (this
+#                                       host, or a private-LAN IP), nothing else.
+#   mobsf        scan (internal)        no internet, no host
+#   mobsf-scan   scan (internal)        uploads the APK, saves the JSON report
+#
+# Mounts for the model (harness):
+#   APK          -> /input/app.apk   read-only
+#   workspace/   -> /workspace       read-only (decompiled output)
+#   findings/    -> /findings        read-write (the only writable bind)
+#   root fs read-only; /tmp is a small tmpfs (HOME and Pi config live there)
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-harness: &harness
+  <<: *hardening
+  build:
+    context: .
+    dockerfile: harness/Dockerfile
+    args:
+      PI_VERSION: ${PI_VERSION:-latest}
+      TOOLS_SHA: ${TOOLS_SHA:-unset}
+  image: apkscope-harness:latest
+  platform: ${APKSCOPE_PLATFORM:-}
+  user: "${HOST_UID:-10001}:${HOST_GID:-10001}"
+  tmpfs:
+    - /tmp:rw,exec,mode=1777,size=1g
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # Pre-stage: APK -> apktool + jadx (+ Hermes) into workspace/.
+  # No network: decompiling needs none.
+  # ─────────────────────────────────────────────────────────────
+  decompile:
+    <<: *harness
+    profiles: [stages]
+    command: ["decompile"]
+    network_mode: none
+    environment:
+      - JAVA_HEAP=${DECOMPILE_JAVA_HEAP:-4g}
+    volumes:
+      - ${APK_PATH:?run via ./apkscope.sh}:/input/app.apk:ro
+      - ${WORKSPACE_DIR:?run via ./apkscope.sh}:/workspace
+    deploy:
+      resources:
+        limits:
+          memory: ${DECOMPILE_MEMORY:-6g}
+
+  # ─────────────────────────────────────────────────────────────
+  # Investigation: Pi + local model. Sealed.
+  # ─────────────────────────────────────────────────────────────
+  harness:
+    <<: *harness
+    command: ["investigate"]
+    env_file: [llm.env]
+    environment:
+      # Only so healthcheck.sh can prove the harness can NOT reach the LLM
+      # box directly — Pi itself talks to llm-gateway.
+      - LLM_TARGET_HOST=${LLM_TARGET_HOST:?run via ./apkscope.sh}
+      - LLM_TARGET_PORT=${LLM_TARGET_PORT:?run via ./apkscope.sh}
+    stdin_open: true
+    tty: true
+    volumes:
+      - ${APK_PATH:?run via ./apkscope.sh}:/input/app.apk:ro
+      - ${WORKSPACE_DIR:?run via ./apkscope.sh}:/workspace:ro
+      - ${FINDINGS_DIR:?run via ./apkscope.sh}:/findings
+    networks: [sealed]
+    depends_on: [egress-proxy, llm-gateway]
+    deploy:
+      resources:
+        limits:
+          memory: ${HARNESS_MEMORY:-4g}
+          pids: ${HARNESS_PIDS:-512}
+
+  # ─────────────────────────────────────────────────────────────
+  # External egress allowlist (default-deny). The config is mounted over the
+  # image's copy so a new filter applies on the next run without a rebuild.
+  # ─────────────────────────────────────────────────────────────
+  egress-proxy:
+    <<: *hardening
+    build: ./ai-proxy
+    image: apkscope-egress-proxy:latest
+    cap_add: [SETUID, SETGID]   # tinyproxy drops to its own user after start
+    tmpfs: [/run, /var/log/tinyproxy]
+    volumes:
+      - ./ai-proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
+      - ./ai-proxy/filter:/etc/tinyproxy/filter:ro
+    networks: [sealed, upstream]
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+  # ─────────────────────────────────────────────────────────────
+  # The single LLM route: llm-gateway:8080 -> LLM_TARGET_HOST:LLM_TARGET_PORT
+  # (host.docker.internal, or the one private-LAN IP in llm.env).
+  # ─────────────────────────────────────────────────────────────
+  llm-gateway:
+    <<: *hardening
+    build: ./llm-gateway
+    image: apkscope-llm-gateway:latest
+    environment:
+      - LLM_TARGET_HOST=${LLM_TARGET_HOST:?run via ./apkscope.sh}
+      - LLM_TARGET_PORT=${LLM_TARGET_PORT:?run via ./apkscope.sh}
+    extra_hosts:
+      # Docker Desktop resolves this natively; on Linux this maps it to the
+      # host's bridge gateway.
+      - "host.docker.internal:host-gateway"
+    networks: [sealed, hostward]
+    deploy:
+      resources:
+        limits:
+          memory: 32m
+
+  # ─────────────────────────────────────────────────────────────
+  # Optional MobSF (only when "mobsf" is in tools.txt). Its own internal
+  # network: no internet, no host, no harness.
+  # ─────────────────────────────────────────────────────────────
+  mobsf:
+    image: ${MOBSF_IMAGE:-opensecurity/mobile-security-framework-mobsf:latest}
+    profiles: [mobsf]
+    platform: ${APKSCOPE_PLATFORM:-}
+    environment:
+      - MOBSF_API_KEY=${MOBSF_API_KEY:-}
+    security_opt: ["no-new-privileges:true"]
+    networks: [scan]
+    deploy:
+      resources:
+        limits:
+          memory: ${MOBSF_MEMORY:-4g}
+
+  mobsf-scan:
+    <<: *harness
+    profiles: [mobsf]
+    command: ["mobsf-scan"]
+    environment:
+      - MOBSF_API_KEY=${MOBSF_API_KEY:-}
+    volumes:
+      - ${APK_PATH:?run via ./apkscope.sh}:/input/app.apk:ro
+      - ${WORKSPACE_DIR:?run via ./apkscope.sh}:/workspace
+    networks: [scan]
+    depends_on: [mobsf]
+
+networks:
+  # No gateway: members can reach each other and nothing else.
+  sealed:
+    internal: true
+  scan:
+    internal: true
+  # Normal bridges. Only egress-proxy is on `upstream`; only llm-gateway is
+  # on `hostward`. Neither is reachable from the harness except through the
+  # one service that bridges to it.
+  upstream:
+    driver: bridge
+  hostward:
+    driver: bridge

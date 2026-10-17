@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApkScope Control Panel</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171c22; --panel-2:#1e252d; --line:#2a333d;
+    --txt:#dbe4ec; --muted:#8a98a6; --accent:#4cc38a; --accent-dim:#2f6f52;
+    --red:#e5534b; --amber:#d9a441; --blue:#4c86c3; --radius:12px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);line-height:1.5;padding:24px 16px 80px}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  h1 .tag{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--accent-dim);border-radius:999px;padding:2px 8px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 2px;display:flex;align-items:center;gap:8px}
+  .card .hint{color:var(--muted);font-size:12px;margin:0 0 14px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  input[type=text]{width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:13px}
+  input[type=text]:focus{outline:none;border-color:var(--blue)}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:160px}
+  button{background:var(--panel-2);border:1px solid var(--line);color:var(--txt);border-radius:8px;
+    padding:8px 13px;font-size:13px;cursor:pointer;font-family:var(--sans)}
+  button:hover{border-color:var(--blue)}
+  button.primary{background:var(--accent-dim);border-color:var(--accent);color:#eafff4}
+  button.sm{padding:5px 9px;font-size:12px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;background:#44515c;flex:none}
+  .dot.ok{background:var(--accent)} .dot.bad{background:var(--red)} .dot.warn{background:var(--amber)}
+  .check{font-weight:700;width:18px;display:inline-block;text-align:center}
+  .check.ok{color:var(--accent)} .check.bad{color:var(--red)} .check.warn{color:var(--amber)} .check.off{color:#44515c}
+  ul.list{list-style:none;padding:0;margin:8px 0 0}
+  ul.list li{display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:8px;padding:7px 10px;margin-bottom:6px;font-family:var(--mono);font-size:13px}
+  ul.list li span{flex:1;word-break:break-all}
+  ul.list li button{margin-left:auto}
+  .tool{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border:1px solid var(--line);
+    border-radius:8px;margin-bottom:7px;background:var(--panel-2)}
+  .tool input{margin-top:3px}
+  .tool .meta{flex:1}
+  .tool .name{font-size:13px;font-weight:600}
+  .tool .desc{font-size:12px;color:var(--muted)}
+  .tool .badge{font-size:10px;color:var(--blue);font-family:var(--mono);margin-left:6px}
+  pre{background:#0b0e11;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;
+    font-family:var(--mono);font-size:12px;margin:10px 0 0;max-height:280px}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .tabs button.active{background:var(--accent-dim);border-color:var(--accent)}
+  .statusgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+  .statusgrid div{display:flex;align-items:center;gap:8px;font-size:13px}
+  .note{font-size:11px;color:var(--muted);margin-top:8px;border-left:2px solid var(--line);padding-left:10px}
+  .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .spacer{flex:1}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ApkScope <span class="tag">LOCAL · SEALED</span></h1>
+  <p class="sub">Configure the sealed APK-investigation sandbox: local LLM, egress allowlist, and the decompile toolset. This page generates the three policy files and reads <code>status.json</code> to show what's live. Everything runs offline.</p>
+  <div class="note" id="serverNote" style="margin:-8px 0 18px">Opened as a file: use <b>Download</b> and move files into the repo yourself. Run <code>./apkscope.sh panel</code> to get <b>Save to repo</b>, live status, and the LLM test.</div>
+
+  <!-- ===== LLM ===== -->
+  <div class="card">
+    <h2>Local LLM (Pi harness → Ollama / LM Studio)</h2>
+    <p class="hint">Point Pi at a model on this machine (<code>localhost</code>) or on one box on your private LAN (IP address). Nothing is sent to any cloud provider. Inside the sandbox, Pi reaches it only through <code>llm-gateway</code>, which forwards to that one host:port.</p>
+    <div class="row">
+      <div style="flex:.5;min-width:120px">
+        <label>Server</label>
+        <select id="llmProvider" style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 11px;font-size:13px">
+          <option value="ollama">Ollama</option>
+          <option value="lmstudio">LM Studio</option>
+        </select>
+      </div>
+      <div>
+        <label>Endpoint</label>
+        <input type="text" id="llmEndpoint" placeholder="http://localhost:11434">
+      </div>
+      <div>
+        <label>Model</label>
+        <input type="text" id="llmModel" placeholder="qwen2.5-coder:7b">
+      </div>
+      <div style="flex:.6;min-width:120px">
+        <label>Context window (tokens)</label>
+        <input type="text" id="llmCtx" placeholder="32768">
+      </div>
+    </div>
+    <div class="flex" style="margin-top:12px">
+      <button class="primary" onclick="testLLM()">Test connection</button>
+      <span class="pill"><span class="dot" id="llmDot"></span><span id="llmStatus">Not tested</span></span>
+    </div>
+    <div class="note">Accepted endpoints: <code>localhost</code>, <code>127.0.0.1</code>, <code>host.docker.internal</code>, or a private IP (10/8, 172.16/12, 192.168/16). <code>validate.sh</code> refuses anything else. Match the context window to the server's (Ollama: <code>OLLAMA_CONTEXT_LENGTH</code>; LM Studio: the model's Context Length, which the gate checks). The browser test needs the server to allow CORS (LM Studio: <i>Enable CORS</i>). Either way, <code>status.json</code> is the source of truth.</div>
+  </div>
+
+  <!-- ===== ALLOWLIST ===== -->
+  <div class="card">
+    <h2>Egress allowlist (hosts)</h2>
+    <p class="hint">Default-deny. Only these hosts can be reached, and only from the model's shell tools, over HTTPS. The model endpoint has its own route, so leave this empty for a fully air-gapped run. Generates <code>ai-proxy/filter</code>.</p>
+    <div class="flex">
+      <input type="text" id="urlInput" placeholder="services.nvd.nist.gov" onkeydown="if(event.key==='Enter')addUrl()">
+      <button onclick="addUrl()">Add</button>
+    </div>
+    <div class="note" id="urlErr" hidden style="color:var(--red);border-color:var(--red)"></div>
+    <ul class="list" id="urlList"></ul>
+    <div class="note">Each host also allows its subdomains. Local, LAN, and IP destinations are refused here and again by <code>validate.sh</code>.</div>
+  </div>
+
+  <!-- ===== TOOLS ===== -->
+  <div class="card">
+    <h2>Decompile &amp; analysis tools</h2>
+    <p class="hint">Tick the tools to install into the harness image, then re-run <code>./apkscope.sh setup</code>. The gate refuses to start if the image is out of date. Checkmarks on the left come from <code>status.json</code>. Generates <code>tools.txt</code>.</p>
+    <div id="toolList"></div>
+  </div>
+
+  <!-- ===== STATUS ===== -->
+  <div class="card">
+    <h2>Status</h2>
+    <p class="hint">Run <code>./apkscope.sh health</code>. It runs <code>healthcheck.sh</code> inside the sealed network, probes the seal, and writes <code>status.json</code> next to this page.</p>
+    <div class="statusgrid" id="statusGrid"></div>
+    <div class="flex" style="margin-top:14px">
+      <button onclick="loadStatus()">Refresh status</button>
+      <span class="pill"><span class="dot" id="stDot"></span><span id="stMsg">status.json not loaded</span></span>
+    </div>
+  </div>
+
+  <!-- ===== GENERATED ===== -->
+  <div class="card">
+    <h2>Generated config</h2>
+    <p class="hint">These are the files the harness reads. Save them into the repo, or download and copy them over.</p>
+    <div class="tabs" id="tabs"></div>
+    <pre id="output"></pre>
+    <div class="flex" style="margin-top:10px">
+      <button class="primary" id="saveBtn" onclick="saveAll()" hidden>Save all to repo</button>
+      <button onclick="downloadCurrent()">Download this file</button>
+      <button onclick="copyCurrent()">Copy</button>
+      <span class="pill" id="saveMsg"></span>
+      <div class="spacer"></div>
+      <button onclick="resetAll()">Reset all settings</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- state ----------
+// `check` = key in status.json "tools" (written by harness/healthcheck.sh).
+const TOOLS = [
+  {id:'default-jre', name:'Java runtime', desc:'Required by apktool and jadx.', badge:'apt', always:true, check:'java'},
+  {id:'unzip',    name:'unzip',     desc:'See the raw APK contents (it is a zip).', badge:'apt', check:'unzip'},
+  {id:'apktool',  name:'apktool',   desc:'Decoded AndroidManifest.xml + smali + resources.', badge:'apt', check:'apktool'},
+  {id:'jadx',     name:'jadx',      desc:'Decompile dex → readable Java (best for the model to read).', badge:'release zip', check:'jadx'},
+  {id:'ripgrep',  name:'ripgrep',   desc:'Fast search across the decompiled tree (keys, URLs, crypto).', badge:'apt', check:'rg'},
+  {id:'trufflehog',name:'trufflehog',desc:'Scan decompiled output for hardcoded secrets.', badge:'binary', check:'trufflehog'},
+  {id:'gitleaks', name:'gitleaks',  desc:'Alternative secret scanner.', badge:'binary', check:'gitleaks'},
+  {id:'hermes-dec',name:'hermes-dec',desc:'React Native: Hermes bytecode (index.android.bundle) → JS.', badge:'pip', check:'hbc-decompiler'},
+  {id:'mobsf',    name:'MobSF',     desc:'Automated scan + JSON report. Runs as its OWN container on an internal network; the model only reads the saved report.', badge:'docker image', check:'mobsf'},
+];
+const DEFAULT_TOOLS = ['default-jre','unzip','apktool','jadx','ripgrep','trufflehog','hermes-dec'];
+let state = {
+  provider:'ollama',
+  endpoint:'http://localhost:11434',
+  model:'qwen2.5-coder:7b',
+  ctx:'32768',
+  urls:[],
+  tools:[...DEFAULT_TOOLS],
+};
+let status = null;
+let currentTab = 'filter';
+let server = false;   // served by scripts/panel-server.py → can save + read repo files
+
+// ---------- persistence ----------
+function save(){ try{ localStorage.setItem('apkscope', JSON.stringify(state)); }catch(e){} }
+function load(){
+  try{ const s = localStorage.getItem('apkscope'); if(s) state = Object.assign(state, JSON.parse(s)); }catch(e){}
+}
+
+// ---------- repo files (when served) ----------
+async function getText(p){ const r=await fetch(p+'?_='+Date.now()); if(!r.ok) throw new Error(r.status); return r.text(); }
+function parseFilter(txt){
+  return txt.split('\n').map(l=>l.replace(/#.*/,'').trim()).filter(Boolean)
+    .map(l=>{ const m=l.match(/^\(\^\|\\\.\)(.+)\$$/); return m ? m[1].replace(/\\\./g,'.') : null; })
+    .filter(Boolean);
+}
+function parseEnv(txt){
+  const o={}; txt.split('\n').forEach(l=>{ const m=l.match(/^([A-Z_]+)=(.*)$/); if(m) o[m[1]]=m[2]; }); return o;
+}
+async function loadFromRepo(){
+  try{
+    const ping = await fetch('./api/ping'); server = ping.ok;
+  }catch(e){ server=false; }
+  if(!server) return;
+  try{
+    const [f,t,e] = await Promise.all([getText('./ai-proxy/filter'), getText('./tools.txt'), getText('./llm.env')]);
+    state.urls = parseFilter(f);
+    state.tools = t.split('\n').map(l=>l.replace(/#.*/,'').trim()).filter(Boolean);
+    const env = parseEnv(e);
+    if(env.LLM_ENDPOINT) state.endpoint = env.LLM_ENDPOINT;
+    if(env.LLM_MODEL) state.model = env.LLM_MODEL;
+    if(env.LLM_CONTEXT_WINDOW) state.ctx = env.LLM_CONTEXT_WINDOW;
+    if(env.PI_PROVIDER) state.provider = env.PI_PROVIDER;
+    save();
+  }catch(err){ /* keep local state */ }
+}
+
+// ---------- LLM test ----------
+async function testLLM(){
+  const dot = document.getElementById('llmDot'), txt = document.getElementById('llmStatus');
+  dot.className='dot warn'; txt.textContent='testing…';
+  try{
+    const url = state.endpoint.replace(/\/$/,'').replace('://host.docker.internal','://127.0.0.1');
+    // OpenAI-compatible list, served by both Ollama and LM Studio.
+    const r = await fetch(url+'/v1/models', {method:'GET'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    const names = (j.data||[]).map(m=>m.id);
+    const want = (state.provider==='ollama' && !state.model.includes(':')) ? state.model+':latest' : state.model;
+    const has = names.includes(want);
+    dot.className = has ? 'dot ok' : 'dot warn';
+    txt.textContent = has ? ('reachable · '+want+' present')
+                          : ('reachable · '+want+' not pulled · have: '+(names.join(', ')||'none'));
+  }catch(e){
+    dot.className='dot bad';
+    txt.textContent='unreachable ('+e.message+'). Serve this page via ./apkscope.sh panel, or check status.json.';
+  }
+}
+// Same rules as validate.sh: this machine, or one private-LAN IP literal.
+function endpointOk(v){
+  return /^http:\/\/(localhost|127\.0\.0\.1|host\.docker\.internal)(:\d{1,5})?\/?$/.test(v)
+      || /^http:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?\/?$/.test(v);
+}
+
+// ---------- URLs ----------
+function hostProblem(h){
+  if(!/^([a-z0-9-]+\.)+[a-z][a-z0-9-]*$/.test(h)) return 'not a hostname (IP addresses and wildcards are not allowed)';
+  if(/(^|\.)(localhost|local|internal|lan|home|arpa)$/.test(h) || h.includes('docker'))
+    return 'points back at this machine or the LAN. The only host-ward route is llm-gateway';
+  return null;
+}
+function renderUrls(){
+  const ul = document.getElementById('urlList'); ul.innerHTML='';
+  if(!state.urls.length){ ul.innerHTML='<li style="color:var(--muted);font-style:italic">empty: fully air-gapped</li>'; }
+  state.urls.forEach((u,i)=>{
+    const li=document.createElement('li');
+    const mark=document.createElement('span'); mark.className='check off'; mark.textContent='•';
+    const name=document.createElement('span'); name.textContent=u;
+    const b=document.createElement('button'); b.className='sm'; b.textContent='remove';
+    b.onclick=()=>{ state.urls.splice(i,1); save(); renderUrls(); gen(); };
+    li.append(mark,name,b); ul.appendChild(li);
+  });
+}
+function addUrl(){
+  const inp=document.getElementById('urlInput'), err=document.getElementById('urlErr');
+  let v=inp.value.trim().toLowerCase();
+  if(!v) return;
+  v=v.replace(/^[a-z]+:\/\//,'').replace(/[\/?#].*$/,'').replace(/:\d+$/,'').replace(/^\*\./,'');
+  const p=hostProblem(v);
+  if(p){ err.textContent=v+': '+p; err.hidden=false; return; }
+  err.hidden=true;
+  if(!state.urls.includes(v)) state.urls.push(v);
+  inp.value=''; save(); renderUrls(); gen();
+}
+
+// ---------- Tools ----------
+function renderTools(){
+  const box=document.getElementById('toolList'); box.innerHTML='';
+  TOOLS.forEach(t=>{
+    const checked = state.tools.includes(t.id) || t.always;
+    const st = status && status.tools ? status.tools[t.check] : undefined;
+    const mark = st===true?'<span class="check ok">✓</span>' : st===false?'<span class="check bad">✕</span>' : '<span class="check off">○</span>';
+    const d=document.createElement('div'); d.className='tool';
+    d.innerHTML =
+      mark +
+      '<input type="checkbox" '+(checked?'checked':'')+(t.always?' disabled':'')+' data-id="'+t.id+'">'+
+      '<div class="meta"><div class="name">'+t.name+'<span class="badge">'+t.badge+'</span>'+
+      (t.always?' <span class="badge" style="color:var(--muted)">required</span>':'')+'</div>'+
+      '<div class="desc">'+t.desc+'</div></div>';
+    const cb=d.querySelector('input');
+    cb.onchange=()=>{
+      if(cb.checked){ if(!state.tools.includes(t.id)) state.tools.push(t.id); }
+      else { state.tools = state.tools.filter(x=>x!==t.id); }
+      save(); gen();
+    };
+    box.appendChild(d);
+  });
+}
+
+// ---------- Status ----------
+async function loadStatus(){
+  const dot=document.getElementById('stDot'), msg=document.getElementById('stMsg');
+  dot.className='dot warn'; msg.textContent='loading…';
+  try{
+    const r=await fetch('./status.json?_='+Date.now());
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    status=await r.json();
+    dot.className = status.sealed && status.llm && status.model_present ? 'dot ok' : 'dot bad';
+    msg.textContent='loaded'+(status.generated_at?(' · '+status.generated_at):'');
+  }catch(e){
+    status=null; dot.className='dot bad';
+    msg.textContent='no status.json yet. Run ./apkscope.sh health';
+  }
+  renderTools(); renderStatusGrid();
+}
+function renderStatusGrid(){
+  const g=document.getElementById('statusGrid'); g.innerHTML='';
+  const line=(label,val)=>{
+    const m = val===true?'<span class="check ok">✓</span>':val===false?'<span class="check bad">✕</span>':'<span class="check off">○</span>';
+    const d=document.createElement('div'); d.innerHTML=m+' '; d.append(label); return d;
+  };
+  const s=status||{};
+  g.appendChild(line('LLM reachable (via llm-gateway)', s.llm));
+  g.appendChild(line('Model pulled'+(s.model?(': '+s.model):''), s.model_present));
+  g.appendChild(line('Egress proxy up', s.proxy));
+  g.appendChild(line('Sealed (live probe)', s.sealed));
+  g.appendChild(line('APK + workspace read-only', s.mounts ? (s.mounts.apk_read_only && s.mounts.workspace_read_only) : undefined));
+  g.appendChild(line('APK decompiled', s.decompiled));
+  state.tools.forEach(id=>{
+    const t=TOOLS.find(x=>x.id===id); if(!t) return;
+    g.appendChild(line(t.name, s.tools?s.tools[t.check]:undefined));
+  });
+}
+
+// ---------- Generators ----------
+function genFilter(){
+  const lines=['# ai-proxy/filter — tinyproxy allowlist (default-deny).',
+               '# Generated by ApkScope control panel. One anchored host pattern per line.'];
+  if(!state.urls.length) lines.push('# (empty = no external egress; fully air-gapped)');
+  // Anchored + escaped: "(^|\.)example\.com$" matches example.com and its
+  // subdomains only. A bare "example.com" would be an unanchored regex.
+  state.urls.forEach(u=>lines.push('(^|\\.)'+u.replace(/\./g,'\\.')+'$'));
+  return lines.join('\n')+'\n';
+}
+function genTools(){
+  const sel = TOOLS.filter(t=>state.tools.includes(t.id)||t.always).map(t=>t.id);
+  return '# tools.txt — selected analysis tools\n'+sel.join('\n')+'\n';
+}
+function genEnv(){
+  const ctx = /^\d+$/.test(state.ctx) ? state.ctx : '32768';
+  return ['# llm.env — Pi harness points here (local, no cloud key)',
+    'LLM_ENDPOINT='+state.endpoint.replace(/\/$/,''),
+    'LLM_MODEL='+state.model,
+    'LLM_CONTEXT_WINDOW='+ctx,
+    'PI_PROVIDER='+(state.provider==='lmstudio'?'lmstudio':'ollama'),
+    'PI_TELEMETRY_DISABLED=1'].join('\n')+'\n';
+}
+const FILES = {
+  filter:{name:'ai-proxy/filter', fn:genFilter},
+  'tools.txt':{name:'tools.txt', fn:genTools},
+  'llm.env':{name:'llm.env', fn:genEnv},
+};
+function renderTabs(){
+  const t=document.getElementById('tabs'); t.innerHTML='';
+  Object.keys(FILES).forEach(k=>{
+    const b=document.createElement('button'); b.textContent=FILES[k].name;
+    if(k===currentTab) b.className='active';
+    b.onclick=()=>{ currentTab=k; renderTabs(); gen(); };
+    t.appendChild(b);
+  });
+}
+function gen(){
+  renderTabs();
+  document.getElementById('output').textContent = FILES[currentTab].fn();
+  renderStatusGrid();
+  const e=document.getElementById('llmEndpoint');
+  e.style.borderColor = endpointOk(state.endpoint) ? '' : 'var(--red)';
+}
+async function saveAll(){
+  const msg=document.getElementById('saveMsg');
+  if(!endpointOk(state.endpoint)){ msg.textContent='✕ endpoint must be this machine or a private-LAN IP'; return; }
+  msg.textContent='saving…';
+  try{
+    for(const k of Object.keys(FILES)){
+      const r=await fetch('./api/save',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:FILES[k].name, content:FILES[k].fn()})});
+      if(!r.ok) throw new Error(FILES[k].name+': HTTP '+r.status);
+    }
+    msg.textContent='✓ saved. Run ./apkscope.sh validate'+(currentToolsChanged()?' (tools changed: re-run setup)':'');
+  }catch(e){ msg.textContent='✕ '+e.message; }
+}
+let savedTools='';
+function currentToolsChanged(){ return savedTools && savedTools!==genTools(); }
+function downloadCurrent(){
+  const blob=new Blob([FILES[currentTab].fn()],{type:'text/plain'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=FILES[currentTab].name.split('/').pop(); a.click();
+}
+function copyCurrent(){ navigator.clipboard&&navigator.clipboard.writeText(FILES[currentTab].fn()); }
+function resetAll(){ try{localStorage.removeItem('apkscope');}catch(e){} location.reload(); }
+
+// ---------- wire up ----------
+async function init(){
+  load();
+  await loadFromRepo();
+  savedTools = server ? genTools() : '';
+  document.getElementById('saveBtn').hidden = !server;
+  document.getElementById('serverNote').hidden = server;
+  document.getElementById('llmEndpoint').value=state.endpoint;
+  document.getElementById('llmModel').value=state.model;
+  document.getElementById('llmCtx').value=state.ctx;
+  const prov=document.getElementById('llmProvider');
+  prov.value=state.provider;
+  prov.onchange=e=>{
+    // Switching server: swap in that server's default port if still on the other's.
+    state.provider=e.target.value;
+    if(state.provider==='lmstudio') state.endpoint=state.endpoint.replace(/:11434\/?$/,':1234');
+    else state.endpoint=state.endpoint.replace(/:1234\/?$/,':11434');
+    document.getElementById('llmEndpoint').value=state.endpoint;
+    save(); gen();
+  };
+  document.getElementById('llmEndpoint').oninput=e=>{state.endpoint=e.target.value.trim();save();gen();};
+  document.getElementById('llmModel').oninput=e=>{state.model=e.target.value.trim();save();gen();};
+  document.getElementById('llmCtx').oninput=e=>{state.ctx=e.target.value.trim();save();gen();};
+  renderUrls(); renderTools(); renderStatusGrid(); gen(); loadStatus();
+}
+init();
+</script>
+</body>
+</html>

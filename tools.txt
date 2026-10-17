@@ -1,0 +1,8 @@
+# tools.txt — selected analysis tools
+default-jre
+unzip
+apktool
+jadx
+ripgrep
+trufflehog
+hermes-dec
